@@ -13,9 +13,8 @@ class TableMetrics:
         self.table = table
         self.metrics = metrics
 
-
-FETCH_SIZE = 32 * 1024 * 1024
-MAX_GROUP_BYTE_SIZE = 128 * 1024 * 1024  # We use 128MB
+MEGA_BYTES_TO_BYTES_RATIO = 1024 * 1024
+FETCH_SIZE = 32 * MEGA_BYTES_TO_BYTES_RATIO
 MILLISECONDS_PER_SCAN = 1
 
 
@@ -44,7 +43,7 @@ class MetricsCalculator:
     """
 
     @staticmethod
-    def compute_metrics(files: Iterable[DataFile], manifest_files_count: int) -> List[TableMetric]:
+    def compute_metrics(files: Iterable[DataFile], manifest_files_count: int, file_target_size_mb: int) -> List[TableMetric]:
         """Computes various metrics for the table."""
         metrics = {name: 0 for name in MetricName}
         metrics[MetricName.FULL_SCAN_OVERHEAD] = manifest_files_count * MILLISECONDS_PER_SCAN
@@ -78,7 +77,11 @@ class MetricsCalculator:
                                                                   total_data_files_size,
                                                                   metrics, partition_metrics)
 
-        after_metrics, worst = MetricsCalculator._compute_after_and_worst_metrics(partition_files, partition_metrics)
+        after_metrics, worst = MetricsCalculator._compute_after_and_worst_metrics(
+            partition_files,
+            partition_metrics,
+            file_target_size_mb,
+        )
         all_metrics = {**metrics, **worst}
 
         return [TableMetric.create_metric(name, value, after_metrics.get(name)) for name, value in all_metrics.items()]
@@ -110,7 +113,8 @@ class MetricsCalculator:
     @staticmethod
     def _compute_after_and_worst_metrics(
             partition_file_sizes: Dict[str, List[DataFile]],
-            partition_metrics: Dict[str, PartitionMetrics]
+            partition_metrics: Dict[str, PartitionMetrics],
+            file_target_size_mb: int,
     ) -> Tuple[Dict[MetricName, int], Dict[MetricName, int]]:
         """Computes metrics after partitioning."""
         after = {
@@ -129,7 +133,7 @@ class MetricsCalculator:
         for partition, files in partition_file_sizes.items():
             data_files_sizes = [file.file_size_in_bytes for file in files if file.content == DataFileContent.DATA]
             partition_new_sizes[partition] = MetricsCalculator.build_partition_groups(data_files_sizes,
-                                                                                      MAX_GROUP_BYTE_SIZE)
+                                                                                      file_target_size_mb * MEGA_BYTES_TO_BYTES_RATIO)
 
         max_file_count_reduction = 0
         max_file_scan_reduction = 0

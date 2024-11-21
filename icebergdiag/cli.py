@@ -43,6 +43,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--catalog-uri', type=str, help='Iceberg Catalog URI')
     parser.add_argument('--database', type=str, help='Database name')
     parser.add_argument('--table-name', type=str, help="Table name or glob pattern (e.g., '*', 'tbl_*')")
+    parser.add_argument('--file-target-size-mb', type=int, help='Target size for files, in mb', default=128)
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable debug logs')
     return parser.parse_args()
 
@@ -140,9 +141,14 @@ def process_tables(
             logging.error(f"Table: {table}, Error: {error}")
 
 
-def generate_table_metrics(diagnostics_manager: IcebergDiagnosticsManager, database: str, table_pattern: str) -> None:
+def generate_table_metrics(
+        diagnostics_manager: IcebergDiagnosticsManager,
+        database: str,
+        table_pattern: str,
+        file_target_size_mb: int,
+) -> None:
     def metric_function(table: Table) -> TableMetrics:
-        return diagnostics_manager.calculate_metrics(table)
+        return diagnostics_manager.calculate_metrics(table, file_target_size_mb)
 
     def result_handler(displayer: TableMetricsDisplayer, table_result: TableMetrics, _) -> None:
         displayer.display_table_metrics(table_result, RunMode.LOCAL)
@@ -166,7 +172,7 @@ def cli_runner() -> None:
         elif args.table_name is None:
             list_tables(diagnostics_manager, args.database)
         else:
-            generate_table_metrics(diagnostics_manager, args.database, args.table_name)
+            generate_table_metrics(diagnostics_manager, args.database, args.table_name, args.file_target_size_mb)
 
     except IcebergDiagnosticsError as e:
         logger.error(e)

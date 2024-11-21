@@ -36,8 +36,8 @@ class IcebergDiagnosticsManager:
             credentials = self.session.get_credentials().get_frozen_credentials()
             self.catalog = load_catalog(self.catalog_name, **{
                 'uri': self.catalog_uri,
-                's3.access-key-id': os.getenv('S3_ACCESS_KEY'),
-                's3.secret-access-key': os.getenv('S3_SECRET_KEY'),
+                's3.access-key-id': credentials.access_key,
+                's3.secret-access-key': credentials.secret_key,
                 's3.region': self.region,
             })
             logger.debug(f"{self.catalog_name} Catalog initialized successfully")
@@ -62,10 +62,10 @@ class IcebergDiagnosticsManager:
         all_tables = self.list_tables(database)
         return fnmatch.filter(all_tables, search_pattern)
 
-    def calculate_metrics(self, table: Table) -> TableMetrics:
+    def calculate_metrics(self, table: Table, file_target_size_mb: int) -> TableMetrics:
         logger.debug(f"Calculating metrics for table: '{table}'", )
         try:
-            return TableDiagnostics(self.catalog, table).get_metrics()
+            return TableDiagnostics(self.catalog, table).get_metrics(file_target_size_mb)
         except Exception as e:
             logger.debug(f"Failed to Calculate metrics: {''.join(traceback.format_exception(e))}")
             raise TableMetricsCalculationError(table, e)
@@ -96,8 +96,9 @@ class TableDiagnostics:
         self.table = table
         self.catalog = catalog
 
-    def get_metrics(self) -> TableMetrics:
-        metrics = MetricsCalculator.compute_metrics(*self._get_manifest_files())
+    def get_metrics(self, file_target_size_mb: int) -> TableMetrics:
+        files, manifest_files_count = self._get_manifest_files()
+        metrics = MetricsCalculator.compute_metrics(files=files, manifest_files_count=manifest_files_count, file_target_size_mb=file_target_size_mb)
         return TableMetrics(self.table, metrics)
 
     def _load_table(self) -> IcebergTable:

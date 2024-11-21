@@ -40,7 +40,7 @@ def scan():
 @pytest.fixture(scope="function")
 def computed_metrics(scan):
     manifest_files_count = 10
-    return MetricsCalculator.compute_metrics(scan, manifest_files_count)
+    return MetricsCalculator.compute_metrics(scan, manifest_files_count, 750)
 
 
 def test_file_count(computed_metrics):

@@ -35,6 +35,7 @@ uv run iceberg-diag [options]
 - `--region REGION`: Set the AWS region for operations, defaults to the specified profile's default region.
 - `--database DATABASE`: Set the database name, will list all available iceberg tables if no `--table-name` provided.
 - `--table-name TABLE_NAME`: Enter the table name or a glob pattern (e.g., `'*'`, `'tbl_*'`).
+- `--file-target-size-mb TABLE_NAME`: Target size of files in MB.
 Provides more detailed analytics and includes information about file size reduction.
 - `-v, --verbose`: Enable verbose logging
 
@@ -56,4 +57,17 @@ Provides more detailed analytics and includes information about file size reduct
 4. Running diagnostics on a specific table in a specific AWS profile and region (completely locally):
    ```bash
     iceberg-diag --catalog-uri <catalog-uri> --region <region> --database <database> --table-name '*'
-    ```
+   ```
+   
+   Output Example:
+   
+| Metric                        | Before    | After  | Improvement |
+|-------------------------------|-----------|--------|-------------|
+| Full Scan Overhead            | 6.65s     | 6.44s  | 3.20%       |
+| Worst Partition Scan Overhead | 0.04s     | <0.01s | 88.89%      |
+| Total File Count              | 1756      | 1649   | 6.09%       |
+| Worst Partition File Count    | 18        | 2      | 94.44%      |
+| Total Table Size              | 71.33 MB  |        |             |
+| Total Partition Size          | 122.36 GB |        |             |
+| Largest Partition Size        | 960.45 MB |        |             |
+| Total Partitions              | 1649      |        |             |
