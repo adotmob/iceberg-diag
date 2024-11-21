@@ -2,55 +2,40 @@
 
 ## Overview
 
-The Iceberg Table Analysis CLI Tool evaluates Iceberg tables to identify how Upsolver optimizations can enhance efficiency.   
-It presents a side-by-side comparison of current metrics against potential improvements in scan durations, file counts, and file sizes, providing a straightforward assessment of optimization opportunities.
+The Iceberg Table Analysis CLI Tool evaluates Iceberg tables to identify how optimizations can enhance efficiency. 
+It presents a side-by-side comparison of current metrics against potential improvements in scan durations, file counts,
+and file sizes, providing a straightforward assessment of optimization opportunities.
 
 
 ## Installation
-`iceberg-diag` can be installed using either Brew or PIP, as detailed below:
+`iceberg-diag` can be used with [`uv`](https://docs.astral.sh/uv):
 
-### Using PIP
-#### Prerequisites
-
-* **Python 3.8 or higher**: Verify Python's installation:
-   ```bash
-   python3 --version
-   ```
-To install `iceberg-diag` using PIP, ensure you have the latest version of `pip`:
-
-```bash
-pip install --upgrade pip
-```
-Then, install the package with `pip`
-```bash
-pip install iceberg-diag
-```
-
-
-### Using Brew
-Execute the following commands to install `iceberg-diag` via Brew:
+### Using uv
+Clone the repository, install uv.
 
  ```bash
- brew tap upsolver/iceberg-diag
- brew install iceberg-diag
+uv venv
+source .venv/bin/activate
+uv sync
+
+uv run iceberg-diag [options]
  ```
 
 
 ## Usage Instructions
 
 ```bash
-iceberg-diag [options]
+uv run iceberg-diag [options]
 ```
 
 ### Command-Line Options
 
 - `-h`, `--help`: Display the help message and exit.
-- `--profile PROFILE`: Set the AWS credentials profile for the session, defaults to the environment's current settings.
+- `--catalog-uri CATALOG_URI`: Set the catalog URI. You should include the protocol and port (e.g., `thrift://1.2.3.4:9083`)
 - `--region REGION`: Set the AWS region for operations, defaults to the specified profile's default region.
 - `--database DATABASE`: Set the database name, will list all available iceberg tables if no `--table-name` provided.
 - `--table-name TABLE_NAME`: Enter the table name or a glob pattern (e.g., `'*'`, `'tbl_*'`).
-- `--remote`: Enable remote diagnostics by sending data to the Upsolver API for processing.   
-Provides more detailed analytics and includes information about file size reducations.
+Provides more detailed analytics and includes information about file size reduction.
 - `-v, --verbose`: Enable verbose logging
 
 ### Usage
@@ -59,21 +44,16 @@ Provides more detailed analytics and includes information about file size reduca
      iceberg-diag --help
     ```
    
-2. Listing all available databases in profile:
+2. Listing all available databases in catalog:
     ```bash
-   iceberg-diag --profile <profile>
+   iceberg-diag --catalog-uri <catalog-uri>
     ```
    
 3. Listing all available iceberg tables in a given database:
     ```bash
-   iceberg-diag --profile <profile> --database <database>
+   iceberg-diag --catalog-uri <catalog-uri>
     ```
 4. Running diagnostics on a specific table in a specific AWS profile and region (completely locally):
    ```bash
-    iceberg-diag --profile <profile> --region <region> --database <database> --table-name '*'
-    ```
-   
-5. Running diagnostics using `remote` option
-    ```bash
-   iceberg-diag --profile <profile> --database <database> --table-name 'prod_*' --remote
+    iceberg-diag --catalog-uri <catalog-uri> --region <region> --database <database> --table-name '*'
     ```

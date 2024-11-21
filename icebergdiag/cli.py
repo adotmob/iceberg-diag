@@ -12,9 +12,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCo
 from rich.table import Table as RichTable
 
 from icebergdiag.diagnostics.manager import IcebergDiagnosticsManager
-from icebergdiag.diagnostics.requester import DiagnosticsRequester
-from icebergdiag.diagnostics.response import DiagnosticsResponse
-from icebergdiag.exceptions import TableMetricsCalculationError, IcebergDiagnosticsError, RequestHandlingError
+from icebergdiag.exceptions import TableMetricsCalculationError, IcebergDiagnosticsError
 from icebergdiag.metrics.table import Table
 from icebergdiag.metrics.table_metrics import TableMetrics
 from icebergdiag.metrics.table_metrics_displayer import TableMetricsDisplayer, RunMode
@@ -41,11 +39,10 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog='iceberg-diag',
         description='Iceberg Diagnostics Tool')
-    parser.add_argument('--profile', type=str, help='AWS profile name')
     parser.add_argument('--region', type=str, help='AWS region')
+    parser.add_argument('--catalog-uri', type=str, help='Iceberg Catalog URI')
     parser.add_argument('--database', type=str, help='Database name')
     parser.add_argument('--table-name', type=str, help="Table name or glob pattern (e.g., '*', 'tbl_*')")
-    parser.add_argument('--remote', action='store_true', help='Use remote diagnostics')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable debug logs')
     return parser.parse_args()
 
@@ -125,14 +122,14 @@ def process_tables(
                   MofNCompleteColumn(),
                   transient=True) as progress:
         displayer = TableMetricsDisplayer(progress.console)
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=1) as executor:  # For some reason, concurrent workers are dumb as hell
             task = progress.add_task("[cyan]Processing...", total=len(tables))
             futures = {executor.submit(metric_function, table): table for table in tables}
             for future in as_completed(futures):
                 try:
                     table_result = future.result()
                     result_handler(displayer, table_result, failed_tables)
-                except (TableMetricsCalculationError, RequestHandlingError) as e:
+                except TableMetricsCalculationError as e:
                     failed_tables.append((futures[future], str(e)))
 
                 progress.update(task, advance=1)
@@ -152,42 +149,22 @@ def generate_table_metrics(diagnostics_manager: IcebergDiagnosticsManager, datab
 
     process_tables(diagnostics_manager, database, table_pattern, metric_function, result_handler)
 
-    stderr_print(
-        "For a comprehensive analysis including all metrics and size reduction calculations, use the --remote option."
-    )
-
-
-def request_table_metrics(diagnostics_manager: IcebergDiagnosticsManager,
-                          database: str,
-                          table_pattern: str) -> None:
-    session_info = diagnostics_manager.get_session_info()
-    requester = DiagnosticsRequester()
-    func = partial(requester.request_metrics, session_info)
-
-    def metric_function(table: Table) -> DiagnosticsResponse:
-        return func([table])
-
-    def result_handler(displayer: TableMetricsDisplayer, table_result: DiagnosticsResponse,
-                       failed_tables: List[Tuple[Table, str]]) -> None:
-        displayer.display_metrics(table_result.metrics, RunMode.REMOTE)
-        failed_tables.extend(table_result.extract_errors())
-
-    process_tables(diagnostics_manager, database, table_pattern, metric_function, result_handler)
-
 
 def cli_runner() -> None:
     args = parse_arguments()
     configure_logging(args.verbose)
     try:
-        diagnostics_manager = run_with_progress(IcebergDiagnosticsManager, "Initializing...",
-                                                profile=args.profile, region=args.region)
+        diagnostics_manager = run_with_progress(
+            IcebergDiagnosticsManager,
+            "Initializing...",
+            catalog_uri=args.catalog_uri,
+            region=args.region,
+        )
 
         if args.database is None:
             list_databases(diagnostics_manager)
         elif args.table_name is None:
             list_tables(diagnostics_manager, args.database)
-        elif args.remote:
-            request_table_metrics(diagnostics_manager, args.database, args.table_name)
         else:
             generate_table_metrics(diagnostics_manager, args.database, args.table_name)
 

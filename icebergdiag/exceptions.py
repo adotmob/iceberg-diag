@@ -11,21 +11,11 @@ class IcebergDiagnosticsError(Exception):
     def __init__(self, message: str = "An error occurred in Iceberg Diagnostics Manager"):
         super().__init__(message)
 
-
-class ProfileNotFoundError(IcebergDiagnosticsError):
-    """Exception raised when the specified AWS profile does not exist."""
-
-    def __init__(self, profile: Optional[str]):
-        profile_msg = f"The AWS profile '{profile}' does not exist." if profile is not None else "No AWS profile found."
-        super().__init__(profile_msg)
-
-
 class SSOAuthenticationError(IcebergDiagnosticsError):
     """Exception raised when the SSO session is expired or invalid."""
 
-    def __init__(self, profile: Optional[str], original_exception: Exception):
-        message = f"There was an issue with the SSO for profile '{profile}': {original_exception}" if profile else str(
-            original_exception)
+    def __init__(self, original_exception: Exception):
+        message = str(original_exception)
         super().__init__(message)
 
 
@@ -47,9 +37,8 @@ class EndpointConnectionError(IcebergDiagnosticsError):
 class SessionInitializationError(IcebergDiagnosticsError):
     """Exception raised when an AWS session fails to initialize."""
 
-    def __init__(self, profile: Optional[str], original_error: Exception):
-        profile_part = f"with profile '{profile}'" if profile else "with default profile"
-        message = f"Failed to initialize AWS session {profile_part}: {original_error}"
+    def __init__(self, original_error: Exception):
+        message = f"Failed to initialize AWS session: {original_error}"
         super().__init__(message)
 
 
@@ -74,17 +63,6 @@ class TableMetricsCalculationError(IcebergDiagnosticsError):
         self.table = table
         self.original_exception = original_exception
         super().__init__(f"Failed to calculate metrics for table '{table}': {original_exception}")
-
-
-class RequestHandlingError(IcebergDiagnosticsError):
-    """Exception raised for errors during remote diagnostics request."""
-
-    def __init__(self, table_names: List[str], error: requests.RequestException):
-        if isinstance(error, requests.HTTPError):
-            message = str(error).split(" for url:")[0]
-        else:
-            message = f'An error occurred during the request for tables {table_names}: {error.__class__.__name__}'
-        super().__init__(message)
 
 
 class ParsingResponseError(IcebergDiagnosticsError):

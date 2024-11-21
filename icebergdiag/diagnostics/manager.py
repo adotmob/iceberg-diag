@@ -1,21 +1,19 @@
 import fnmatch
 import logging
+import os
 import traceback
 from itertools import chain
 from typing import List, Iterable, Dict, Any, Optional, Tuple
 
 import boto3
 import botocore.exceptions as boto3_exceptions
-from botocore.client import BaseClient
-from botocore.config import Config
-from pyiceberg.catalog import load_glue, Catalog
-from pyiceberg.catalog.glue import GlueCatalog
+from pyiceberg.catalog import Catalog, load_catalog
 from pyiceberg.manifest import DataFile
 from pyiceberg.table import Table as IcebergTable, _open_manifest
 from pyiceberg.utils.concurrent import ExecutorFactory
 
-from icebergdiag.exceptions import ProfileNotFoundError, EndpointConnectionError, \
-    IcebergDiagnosticsError, DatabaseNotFound, TableMetricsCalculationError, SSOAuthenticationError, \
+from icebergdiag.exceptions import EndpointConnectionError, \
+    IcebergDiagnosticsError, TableMetricsCalculationError, SSOAuthenticationError, \
     SessionInitializationError
 from icebergdiag.metrics.table import Table
 from icebergdiag.metrics.table_metrics import TableMetrics, MetricsCalculator
@@ -24,62 +22,40 @@ logger = logging.getLogger(__name__)
 
 
 class IcebergDiagnosticsManager:
-    def __init__(self, profile: str, region: Optional[str] = None):
-        logger.debug(f"Initializing with profile={profile}, region={region if region else 'default'}")
-        self.profile = profile
+    def __init__(self, catalog_uri: str, region: Optional[str] = None):
+        logger.debug(f"Initializing with region={region if region else 'default'}")
+        self.catalog_uri = catalog_uri
+        self.catalog_name = 'Iceberg 🧊'
         self.region = region
         self._initialize_catalog()
 
     def _initialize_catalog(self):
         logger.debug("Starting catalog initialization")
         try:
-            self._validate()
-            self.session = boto3.Session(profile_name=self.profile, region_name=self.region)
+            self.session = boto3.Session(region_name=self.region)
             credentials = self.session.get_credentials().get_frozen_credentials()
-            self.catalog = load_glue(name="glue",
-                                     conf={"profile_name": self.profile,
-                                           "region_name": self.session.region_name,
-                                           "aws_access_key_id": credentials.access_key,
-                                           "aws_secret_access_key": credentials.secret_key,
-                                           "aws_session_token": credentials.token,
-                                           "s3.access-key-id": credentials.access_key,
-                                           "s3.secret-access-key": credentials.secret_key,
-                                           "s3.session-token": credentials.token,
-                                           "s3.region": self.session.region_name,
-                                           })
-            self.glue_client = IcebergDiagnosticsManager._get_glue_client(self.catalog)
-            logger.debug("Glue Catalog initialized successfully")
-        except boto3_exceptions.ProfileNotFound:
-            raise ProfileNotFoundError(self.profile)
+            self.catalog = load_catalog(self.catalog_name, **{
+                'uri': self.catalog_uri,
+                's3.access-key-id': os.getenv('S3_ACCESS_KEY'),
+                's3.secret-access-key': os.getenv('S3_SECRET_KEY'),
+                's3.region': self.region,
+            })
+            logger.debug(f"{self.catalog_name} Catalog initialized successfully")
         except boto3_exceptions.EndpointConnectionError:
             raise EndpointConnectionError(self.region)
         except boto3_exceptions.SSOError as e:
-            raise SSOAuthenticationError(self.profile, e) from e
+            raise SSOAuthenticationError(e) from e
         except boto3_exceptions.BotoCoreError as e:
-            raise SessionInitializationError(self.profile, e)
+            raise SessionInitializationError(e)
         except Exception as e:
             raise IcebergDiagnosticsError(f"An unexpected error occurred: {e}")
-
-    def _validate(self):
-        logger.debug("Validating session")
-        try:
-            session = boto3.Session(profile_name=self.profile, region_name=self.region)
-            temp_config = Config(retries={'max_attempts': 1})
-            temp_glue_client = session.client('glue', config=temp_config)
-            temp_glue_client.get_databases(MaxResults=1)
-            logger.debug("Session validated successfully")
-        except Exception as e:
-            raise e
 
     def list_databases(self) -> List[str]:
         databases = self.catalog.list_namespaces()
         return sorted([db[0] for db in databases])
 
     def list_tables(self, database: str) -> List[str]:
-        try:
-            return self._fetch_and_filter_tables(database)
-        except self.glue_client.exceptions.EntityNotFoundException as e:
-            raise DatabaseNotFound(database) from e
+        return self._fetch_and_filter_tables(database)
 
     def get_matching_tables(self, database: str, search_pattern: str) -> List[str]:
         logger.debug(f"Searching for tables in database '{database}' with pattern '{search_pattern}'")
@@ -95,34 +71,11 @@ class IcebergDiagnosticsManager:
             raise TableMetricsCalculationError(table, e)
 
     def _fetch_and_filter_tables(self, database: str) -> List[str]:
-        next_token = None
         iceberg_tables = []
-        while True:
-            params = {'DatabaseName': database}
-            if next_token:
-                params['NextToken'] = next_token
-
-            response = self.glue_client.get_tables(**params)
-            tables = response.get('TableList', [])
-            iceberg_tables.extend([tbl['Name'] for tbl in tables if IcebergDiagnosticsManager._is_iceberg_table(tbl)])
-
-            next_token = response.get("NextToken")
-            if not next_token:
-                break
+        tables = self.catalog.list_tables(database)
+        iceberg_tables.extend([t[1] for t in tables])
 
         return sorted(iceberg_tables)
-
-    @staticmethod
-    def _get_glue_client(catalog: Catalog) -> BaseClient:
-        if isinstance(catalog, GlueCatalog):
-            return catalog.glue
-        else:
-            raise TypeError("Expected GlueCatalog, got Catalog")
-
-    @staticmethod
-    def _is_iceberg_table(table_properties: Dict) -> bool:
-        parameters = table_properties['Parameters']
-        return parameters.get('table_type') == 'ICEBERG'
 
     def get_session_info(self) -> Dict[str, Any]:
 
