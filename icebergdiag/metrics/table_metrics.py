@@ -46,7 +46,7 @@ class MetricsCalculator:
     """
 
     @staticmethod
-    def compute_metrics(files: Iterable[DataFile], manifest_files_count: int, file_target_size_mb: int) -> Tuple[List[TableMetric], DataFrame]:
+    def compute_metrics(files: Iterable[Tuple[DataFile, dict]], manifest_files_count: int, file_target_size_mb: int) -> Tuple[List[TableMetric], DataFrame]:
         """Computes various metrics for the table."""
         metrics = {name: 0 for name in MetricName}
         metrics[MetricName.FULL_SCAN_OVERHEAD] = manifest_files_count * MILLISECONDS_PER_SCAN
@@ -55,8 +55,9 @@ class MetricsCalculator:
         total_data_files_count = 0
         total_data_files_size = 0
 
-        for file in files:
-            partition = MetricsCalculator.deterministic_repr(file.partition) # TODO: Check if not generating the deterministic STRING representation is better for later use (like grouping partitions sharing same part of the partition together
+        for file, partitions in files:
+            # partition = MetricsCalculator.deterministic_repr(file.partition)
+            partitions_as_str = str(partitions)
             file_size = file.file_size_in_bytes
             read_cost = MetricsCalculator.calc_read_file_cost(file_size)
             overhead = read_cost * MILLISECONDS_PER_SCAN
@@ -69,11 +70,11 @@ class MetricsCalculator:
                 total_data_files_count += 1
                 total_data_files_size += file_size
 
-            partition_metric = partition_metrics[partition]
+            partition_metric = partition_metrics[partitions_as_str]
             partition_metric.file_count += 1
             partition_metric.total_size += file_size
             partition_metric.scan_overhead += overhead
-            partition_files[partition].append(file)
+            partition_files[partitions_as_str].append(file)
 
         metrics[MetricName.TOTAL_PARTITIONS] = len(partition_metrics.keys())
         metrics = MetricsCalculator._update_avg_and_worst_metrics(total_data_files_count,

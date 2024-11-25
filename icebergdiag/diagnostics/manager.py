@@ -1,6 +1,5 @@
 import fnmatch
 import logging
-import os
 import traceback
 from itertools import chain
 from typing import List, Iterable, Dict, Any, Optional, Tuple
@@ -9,7 +8,9 @@ import boto3
 import botocore.exceptions as boto3_exceptions
 from pyiceberg.catalog import Catalog, load_catalog
 from pyiceberg.manifest import DataFile
+from pyiceberg.partitioning import PartitionField
 from pyiceberg.table import Table as IcebergTable, _open_manifest
+from pyiceberg.types import NestedField
 from pyiceberg.utils.concurrent import ExecutorFactory
 
 from icebergdiag.exceptions import EndpointConnectionError, \
@@ -109,7 +110,7 @@ class TableDiagnostics:
         logger.debug(f"Loading table {self.table.full_table_name()}")
         return self.catalog.load_table(self.table.full_table_name())
 
-    def _get_manifest_files(self) -> Tuple[Iterable[DataFile], int]:
+    def _get_manifest_files(self) -> Tuple[Iterable[Tuple[DataFile, dict]], int]:
         logger.debug(f"Getting manifest files for table '{self.table}'")
         """Returns a list of all data files in manifest entries.
 
@@ -132,7 +133,7 @@ class TableDiagnostics:
         logger.debug(f"Opening manifests files for table {self.table.full_table_name()}")
         manifests = snapshot.manifests(io)
         executor = ExecutorFactory.get_or_create()
-        all_data_files = []
+        all_data_files: list[DataFile] = []
         for manifest_entry in chain(
                 *executor.map(
                     lambda manifest: _open_manifest(io, manifest, no_filter, no_filter),
@@ -141,4 +142,46 @@ class TableDiagnostics:
             all_data_files.append(manifest_entry.data_file)
 
         logger.debug(f"All data loaded successfully for table {self.table.full_table_name()}")
-        return all_data_files, len(manifests)
+        all_data_files_with_translated_partitions = []
+        for f in all_data_files:
+            translated_partition_values = self.translate_partition_as_files_to_partitions_as_data(f, table)
+            all_data_files_with_translated_partitions.append((f, translated_partition_values))
+        return all_data_files_with_translated_partitions, len(manifests)
+
+    @staticmethod
+    def translate_partition_as_files_to_partitions_as_data(file: DataFile, table: IcebergTable) -> dict[str, Any]:
+        """
+        Translate partitions, as stored in manifest Iceberg files and used in file layout, to partitions as data stored
+        in Iceberg table
+
+        The translation is done by first recovering the key and value of each partition assigned to the given `file`.
+        For each partition recovered, we can match its name to the corresponding `PartitionField` in the table metadata.
+        This PartitionField is matched to a `NestedField` in the table schema, by matching the `field_id` and the `source_id`.
+        We can then translate the value of the partition of the file, using the type of the `NestedField` and the transform
+        of the `PartitionField`.
+
+
+        :param file: File to convert the partition path
+        :param table: Table whose partitions are being translated
+        :return: Dict containing key to value partitions, translated to human & comprehensible data
+        """
+        translated_partition_values = {}
+        for idx, partition_file_name in enumerate(file.partition._position_to_field_name):  # Unfortunately only way of getting key & value
+            list_partition_fields: list[PartitionField] = [pf for pf in table.metadata.partition_specs[0].fields if pf.name == partition_file_name]
+            if len(list_partition_fields) != 1:
+                raise IndexError(f'found none or multiple match for partition {partition_file_name} in table metadata partition specs')
+            partition_field_metadata = list_partition_fields[0]
+
+            list_corresponding_fields: list[NestedField] = [f for f in table.schema().fields if f.field_id == partition_field_metadata.source_id]
+            if len(list_corresponding_fields) != 1:
+                raise IndexError(f'found none or multiple match for field {partition_field_metadata} in table schema')
+            corresponding_field = list_corresponding_fields[0]
+
+
+            # We use to_human_string to "revert" the Iceberg transformation:
+            # - It does not require additional code
+            # - It is compatible with all transformation out of the box, even future ones
+            # TODO: We could definitely implement a simple function that would use `to_human_string` as a fallback
+            translated_value = partition_field_metadata.transform.to_human_string(corresponding_field.field_type, value=file.partition[idx])
+            translated_partition_values[corresponding_field.name] = translated_value
+        return translated_partition_values

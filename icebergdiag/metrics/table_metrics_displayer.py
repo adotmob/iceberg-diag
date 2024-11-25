@@ -78,7 +78,7 @@ class TableMetricsDisplayer:
         :param sort_by: Column used for sorting
         :return: Table
         """
-        output_table = Table(show_header=True, title=f"Stats per partitions for [bold]{title}[/]")
+        output_table = Table(show_header=True, show_lines=True, title=f"Stats per partitions for [bold]{title}[/]")
 
         col_metrics = [
             PartitionsMetricName.PARTITION_NAME,
