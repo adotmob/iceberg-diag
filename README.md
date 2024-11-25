@@ -36,6 +36,9 @@ uv run iceberg-diag [options]
 - `--database DATABASE`: Set the database name, will list all available iceberg tables if no `--table-name` provided.
 - `--table-name TABLE_NAME`: Enter the table name or a glob pattern (e.g., `'*'`, `'tbl_*'`).
 - `--file-target-size-mb TABLE_NAME`: Target size of files in MB.
+- `--display-partitions True`: Wherever to display individual partitions stats.
+- `--display-partitions-limit INT`: Limit of partitions stats to display.
+- `--display-partitions-sort 'COLUMN NAME`: Column to sort partitions stats.
 Provides more detailed analytics and includes information about file size reduction.
 - `-v, --verbose`: Enable verbose logging
 
@@ -54,11 +57,16 @@ Provides more detailed analytics and includes information about file size reduct
     ```bash
    iceberg-diag --catalog-uri <catalog-uri>
     ```
-4. Running diagnostics on a specific table in a specific AWS profile and region (completely locally):
+4. Running diagnostics on a specific table on specific region region (completely locally):
    ```bash
     iceberg-diag --catalog-uri <catalog-uri> --region <region> --database <database> --table-name '*'
    ```
    
+5. Running diagnostic on a specific table and display individual partitions stats:
+   ```bash
+    iceberg-diag --catalog-uri <catalog-uri> --region <region> --database <database> --table-name '*'  --display-partitions True --display-partitions-limit 5 --display-partitions-sort 'Improvement Scan Overhead %'
+   ```
+
    Output Example:
    
 | Metric                        | Before    | After  | Improvement |

@@ -98,8 +98,12 @@ class TableDiagnostics:
 
     def get_metrics(self, file_target_size_mb: int) -> TableMetrics:
         files, manifest_files_count = self._get_manifest_files()
-        metrics = MetricsCalculator.compute_metrics(files=files, manifest_files_count=manifest_files_count, file_target_size_mb=file_target_size_mb)
-        return TableMetrics(self.table, metrics)
+        metrics, df = MetricsCalculator.compute_metrics(
+            files=files,
+            manifest_files_count=manifest_files_count,
+            file_target_size_mb=file_target_size_mb,
+        )
+        return TableMetrics(table=self.table, metrics=metrics, before_and_after_per_partitions=df)
 
     def _load_table(self) -> IcebergTable:
         logger.debug(f"Loading table {self.table.full_table_name()}")

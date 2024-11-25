@@ -1,17 +1,20 @@
 from collections import defaultdict
+import polars as pl
 from typing import Iterable, List, Dict, Tuple
 
+from polars import DataFrame
 from pyiceberg.manifest import DataFile, DataFileContent
 from pyiceberg.typedef import Record
 
 from icebergdiag.metrics.table import Table
-from icebergdiag.metrics.table_metric import TableMetric, MetricName
+from icebergdiag.metrics.table_metric import TableMetric, MetricName, PartitionsMetricName
 
 
 class TableMetrics:
-    def __init__(self, table: Table, metrics: List[TableMetric]):
+    def __init__(self, table: Table, metrics: List[TableMetric], before_and_after_per_partitions: DataFrame):
         self.table = table
         self.metrics = metrics
+        self.before_and_after_per_partitions = before_and_after_per_partitions
 
 MEGA_BYTES_TO_BYTES_RATIO = 1024 * 1024
 FETCH_SIZE = 32 * MEGA_BYTES_TO_BYTES_RATIO
@@ -43,7 +46,7 @@ class MetricsCalculator:
     """
 
     @staticmethod
-    def compute_metrics(files: Iterable[DataFile], manifest_files_count: int, file_target_size_mb: int) -> List[TableMetric]:
+    def compute_metrics(files: Iterable[DataFile], manifest_files_count: int, file_target_size_mb: int) -> Tuple[List[TableMetric], DataFrame]:
         """Computes various metrics for the table."""
         metrics = {name: 0 for name in MetricName}
         metrics[MetricName.FULL_SCAN_OVERHEAD] = manifest_files_count * MILLISECONDS_PER_SCAN
@@ -53,7 +56,7 @@ class MetricsCalculator:
         total_data_files_size = 0
 
         for file in files:
-            partition = MetricsCalculator.deterministic_repr(file.partition)
+            partition = MetricsCalculator.deterministic_repr(file.partition) # TODO: Check if not generating the deterministic STRING representation is better for later use (like grouping partitions sharing same part of the partition together
             file_size = file.file_size_in_bytes
             read_cost = MetricsCalculator.calc_read_file_cost(file_size)
             overhead = read_cost * MILLISECONDS_PER_SCAN
@@ -77,14 +80,18 @@ class MetricsCalculator:
                                                                   total_data_files_size,
                                                                   metrics, partition_metrics)
 
-        after_metrics, worst = MetricsCalculator._compute_after_and_worst_metrics(
+        after_metrics, worst, before_and_after_per_partitions = MetricsCalculator._compute_after_and_worst_metrics(
             partition_files,
             partition_metrics,
             file_target_size_mb,
         )
         all_metrics = {**metrics, **worst}
 
-        return [TableMetric.create_metric(name, value, after_metrics.get(name)) for name, value in all_metrics.items()]
+
+        return (
+            [TableMetric.create_metric(name, value, after_metrics.get(name)) for name, value in all_metrics.items()],
+            TableMetric.compute_stats_per_partitions(before_and_after_per_partitions)
+        )
 
     @staticmethod
     def deterministic_repr(record: Record) -> str:
@@ -115,7 +122,7 @@ class MetricsCalculator:
             partition_file_sizes: Dict[str, List[DataFile]],
             partition_metrics: Dict[str, PartitionMetrics],
             file_target_size_mb: int,
-    ) -> Tuple[Dict[MetricName, int], Dict[MetricName, int]]:
+    ) -> Tuple[Dict[MetricName, int], Dict[MetricName, int], pl.DataFrame]:
         """Computes metrics after partitioning."""
         after = {
             MetricName.FILE_COUNT: 0,
@@ -129,19 +136,30 @@ class MetricsCalculator:
             MetricName.WORST_SCAN_OVERHEAD: 0
         }
 
+
         partition_new_sizes = {}
         for partition, files in partition_file_sizes.items():
             data_files_sizes = [file.file_size_in_bytes for file in files if file.content == DataFileContent.DATA]
-            partition_new_sizes[partition] = MetricsCalculator.build_partition_groups(data_files_sizes,
-                                                                                      file_target_size_mb * MEGA_BYTES_TO_BYTES_RATIO)
+            new_partition = MetricsCalculator.build_partition_groups(
+                data_files_sizes,
+                file_target_size_mb * MEGA_BYTES_TO_BYTES_RATIO,
+            )
+            partition_cost = sum(MetricsCalculator.calc_read_file_cost(sum(group)) for group in new_partition)
+            partition_overhead = partition_cost * MILLISECONDS_PER_SCAN
+
+            partition_new_sizes[partition] = {
+                'overhead': partition_overhead,
+                'list_files': new_partition,
+            }
+
 
         max_file_count_reduction = 0
         max_file_scan_reduction = 0
+        partition_resume = []
         for partition_name, new_partition in partition_new_sizes.items():
-            files_count = len(new_partition)
+            files_count = len(new_partition['list_files'])
             after[MetricName.FILE_COUNT] += files_count
-            partition_cost = sum(MetricsCalculator.calc_read_file_cost(sum(group)) for group in new_partition)
-            partition_overhead = partition_cost * MILLISECONDS_PER_SCAN
+            partition_overhead = new_partition['overhead']
             after[MetricName.FULL_SCAN_OVERHEAD] += partition_overhead
 
             file_count_reduction = partition_metrics[partition_name].file_count - files_count
@@ -156,7 +174,16 @@ class MetricsCalculator:
                 worst_partitions[MetricName.WORST_SCAN_OVERHEAD] = partition_metrics[partition_name].scan_overhead
                 after[MetricName.WORST_SCAN_OVERHEAD] = partition_overhead
 
-        return after, worst_partitions
+
+            partition_resume.append({
+                PartitionsMetricName.PARTITION_NAME: partition_name,
+                PartitionsMetricName.OLD_FILE_COUNT: partition_metrics[partition_name].file_count,
+                PartitionsMetricName.OLD_OVERHEAD: partition_metrics[partition_name].scan_overhead,
+                PartitionsMetricName.NEW_FILE_COUNT: files_count,
+                PartitionsMetricName.NEW_OVERHEAD: partition_overhead,
+            })
+
+        return after, worst_partitions, pl.DataFrame(partition_resume)
 
     @staticmethod
     def _create_metric_instances(before_metrics: Dict[MetricName, int],

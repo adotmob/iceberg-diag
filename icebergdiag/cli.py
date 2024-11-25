@@ -2,7 +2,6 @@ import argparse
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from functools import partial
 from typing import List, Callable, Any, Tuple
 
 from rich import box
@@ -14,8 +13,9 @@ from rich.table import Table as RichTable
 from icebergdiag.diagnostics.manager import IcebergDiagnosticsManager
 from icebergdiag.exceptions import TableMetricsCalculationError, IcebergDiagnosticsError
 from icebergdiag.metrics.table import Table
+from icebergdiag.metrics.table_metric import PartitionsMetricName
 from icebergdiag.metrics.table_metrics import TableMetrics
-from icebergdiag.metrics.table_metrics_displayer import TableMetricsDisplayer, RunMode
+from icebergdiag.metrics.table_metrics_displayer import TableMetricsDisplayer
 
 
 def configure_logging(verbose=False):
@@ -44,6 +44,9 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('--database', type=str, help='Database name')
     parser.add_argument('--table-name', type=str, help="Table name or glob pattern (e.g., '*', 'tbl_*')")
     parser.add_argument('--file-target-size-mb', type=int, help='Target size for files, in mb', default=128)
+    parser.add_argument('--display-partitions', type=bool, help='Wherever to display additional stats on partitions', default=False)
+    parser.add_argument('--display-partitions-limit', type=int, help='Number of lines to display when using additional stats on partitions', default=15)
+    parser.add_argument('--display-partitions-sort', type=PartitionsMetricName, help='Column to sort (desc) when using additional stats on partitions', choices=list(PartitionsMetricName), default=PartitionsMetricName.DIFF_OVERHEAD)
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable debug logs')
     return parser.parse_args()
 
@@ -146,13 +149,21 @@ def generate_table_metrics(
         database: str,
         table_pattern: str,
         file_target_size_mb: int,
+        display_partitions: bool=True,
+        limit_partitions: int=15,
+        sort_by_partitions=PartitionsMetricName.DIFF_OVERHEAD,
 ) -> None:
     def metric_function(table: Table) -> TableMetrics:
         return diagnostics_manager.calculate_metrics(table, file_target_size_mb)
 
     def result_handler(displayer: TableMetricsDisplayer, table_result: TableMetrics, _) -> None:
-        displayer.display_table_metrics(table_result, RunMode.LOCAL)
-
+        displayer.display_table_metrics(table_result)
+        if display_partitions:
+            displayer.display_best_partitions_improvements(
+                table_metrics=table_result,
+                sort_by=sort_by_partitions,
+                limit=limit_partitions,
+            )
     process_tables(diagnostics_manager, database, table_pattern, metric_function, result_handler)
 
 
@@ -172,7 +183,15 @@ def cli_runner() -> None:
         elif args.table_name is None:
             list_tables(diagnostics_manager, args.database)
         else:
-            generate_table_metrics(diagnostics_manager, args.database, args.table_name, args.file_target_size_mb)
+            generate_table_metrics(
+                diagnostics_manager=diagnostics_manager,
+                database=args.database,
+                table_pattern=args.table_name,
+                file_target_size_mb=args.file_target_size_mb,
+                display_partitions=args.display_partitions,
+                limit_partitions=args.display_partitions_limit,
+                sort_by_partitions=args.display_partitions_sort,
+            )
 
     except IcebergDiagnosticsError as e:
         logger.error(e)

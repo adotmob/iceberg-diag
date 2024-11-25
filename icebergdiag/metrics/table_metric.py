@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import polars as pl
 from typing import Generic, TypeVar, Optional
 
 from icebergdiag.utils import OrderedEnum
@@ -16,6 +17,20 @@ class MetricName(OrderedEnum):
     TOTAL_TABLE_SIZE = "Total Table Size"
     LARGEST_PARTITION_SIZE = "Largest Partition Size"
     TOTAL_PARTITIONS = "Total Partitions"
+
+class PartitionsMetricName(str, OrderedEnum):
+    PARTITION_NAME = "Partition Name"
+    OLD_FILE_COUNT = "Before File Count"
+    NEW_FILE_COUNT = "After File Count"
+    DIFF_FILE_COUNT = "Improvement File Count"
+    DIFF_FILE_COUNT_PERC = "Improvement File Count %"
+    OLD_OVERHEAD = "Before Scan Overhead"
+    NEW_OVERHEAD = "After Scan Overhead"
+    DIFF_OVERHEAD = "Improvement Scan Overhead"
+    DIFF_OVERHEAD_PERC = "Improvement Scan Overhead %"
+
+    def __str__(self):
+        return self.value
 
 
 class MetricConfig:
@@ -39,14 +54,11 @@ class TableMetric(ABC, Generic[T]):
     def __init__(self, name: MetricName,
                  before: T,
                  after: Optional[T] = None,
-                 display_in_local: bool = True,
-                 display_improvement: bool = True):
+                 ):
         self.name = name
         self.before = before
         self.after = after
         self.improvement = self._calculate_improvement() if after is not None else None
-        self.display_in_local = display_in_local
-        self.display_improvement = display_improvement
 
     def __eq__(self, other):
         return self.name == other.name and self.before == other.before and self.after == self.after
@@ -60,14 +72,35 @@ class TableMetric(ABC, Generic[T]):
         pass
 
     def get_improvement_value(self) -> str:
-        if not self.display_improvement:
-            return ""
         return f"{self._calculate_improvement():.2f}%" if self.improvement is not None else ""
 
     def _calculate_improvement(self) -> float:
         if self.before == 0 and self.after == 0:
             return 0
         return (1 - self.after / self.before) * 100 if self.before != 0 else float('inf')
+
+
+    @staticmethod
+    def compute_stats_per_partitions(df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Compute statistics per the partitions
+        :param df: DataFrame containing raw results
+        :return: Enriched DataFrame
+        """
+        return df.with_columns(
+    (
+                pl.col(PartitionsMetricName.OLD_FILE_COUNT.value) - pl.col(PartitionsMetricName.NEW_FILE_COUNT.value)
+            ).alias(PartitionsMetricName.DIFF_FILE_COUNT.value),
+            (
+                    pl.col(PartitionsMetricName.OLD_OVERHEAD.value) - pl.col(PartitionsMetricName.NEW_OVERHEAD.value)
+            ).alias(PartitionsMetricName.DIFF_OVERHEAD.value),
+            (
+                1 - pl.col(PartitionsMetricName.NEW_FILE_COUNT.value).truediv(pl.col(PartitionsMetricName.OLD_FILE_COUNT.value))
+            ).mul(100).alias(PartitionsMetricName.DIFF_FILE_COUNT_PERC.value),
+            (
+                1 - pl.col(PartitionsMetricName.NEW_OVERHEAD.value).truediv(pl.col(PartitionsMetricName.OLD_OVERHEAD.value))
+            ).mul(100).alias(PartitionsMetricName.DIFF_OVERHEAD_PERC.value),
+        )
 
     @staticmethod
     def create_metric(metric_name: MetricName, before_value: T, after_value: Optional[T] = None) -> 'TableMetric':
@@ -96,8 +129,7 @@ class TableMetric(ABC, Generic[T]):
         }
         if metric_name in metric_map:
             metric_config = metric_map[metric_name]
-            return metric_config.metric_type(metric_name, before_value, after_value,
-                                             metric_config.local_mode_supported, metric_config.show_improvement)
+            return metric_config.metric_type(metric_name, before_value, after_value)
         else:
             raise ValueError(f"Unknown metric name: {metric_name}")
 
