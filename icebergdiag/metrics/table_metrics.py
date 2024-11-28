@@ -151,6 +151,7 @@ class MetricsCalculator:
             partition_new_sizes[partition] = {
                 'overhead': partition_overhead,
                 'list_files': new_partition,
+                'partition_size': sum(data_files_sizes),
             }
 
 
@@ -182,6 +183,7 @@ class MetricsCalculator:
                 PartitionsMetricName.OLD_OVERHEAD: partition_metrics[partition_name].scan_overhead,
                 PartitionsMetricName.NEW_FILE_COUNT: files_count,
                 PartitionsMetricName.NEW_OVERHEAD: partition_overhead,
+                PartitionsMetricName.SIZE: new_partition['partition_size'] / (1000 * 1000),
             })
 
         return after, worst_partitions, pl.DataFrame(partition_resume)

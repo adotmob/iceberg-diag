@@ -23,6 +23,7 @@ class PartitionsMetricName(str, OrderedEnum):
     OLD_FILE_COUNT = "Before File Count"
     NEW_FILE_COUNT = "After File Count"
     DIFF_FILE_COUNT = "Improvement File Count"
+    SIZE = "Partition Size MB"
     DIFF_FILE_COUNT_PERC = "Improvement File Count %"
     OLD_OVERHEAD = "Before Scan Overhead"
     NEW_OVERHEAD = "After Scan Overhead"

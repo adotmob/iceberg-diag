@@ -66,6 +66,7 @@ class TableMetricsDisplayer:
                 str(d[PartitionsMetricName.NEW_OVERHEAD]),
                 str(d[PartitionsMetricName.DIFF_OVERHEAD]),
                 "{:.2f}%".format(d[PartitionsMetricName.DIFF_OVERHEAD_PERC]),
+                "{:.2f}".format(d[PartitionsMetricName.SIZE]),
             )
         panel = Panel(output_table, box=box.MINIMAL)
         self.console.print(panel)
@@ -78,7 +79,7 @@ class TableMetricsDisplayer:
         :param sort_by: Column used for sorting
         :return: Table
         """
-        output_table = Table(show_header=True, show_lines=True, title=f"Stats per partitions for [bold]{title}[/]")
+        output_table = Table(show_header=True, show_lines=True, expand=True, title=f"Stats per partitions for [bold]{title}[/]")
 
         col_metrics = [
             PartitionsMetricName.PARTITION_NAME,
@@ -90,6 +91,7 @@ class TableMetricsDisplayer:
             PartitionsMetricName.NEW_OVERHEAD,
             PartitionsMetricName.DIFF_OVERHEAD,
             PartitionsMetricName.DIFF_OVERHEAD_PERC,
+            PartitionsMetricName.SIZE,
         ]
         for col in col_metrics:
             displayed_value = col.value
@@ -98,5 +100,5 @@ class TableMetricsDisplayer:
                 displayed_value += " :downwards_button:"
             if col == PartitionsMetricName.PARTITION_NAME:
                 justify: Literal['left'] = 'left'
-            output_table.add_column(displayed_value, justify=justify)
+            output_table.add_column(displayed_value, justify=justify, overflow='fold')
         return output_table
